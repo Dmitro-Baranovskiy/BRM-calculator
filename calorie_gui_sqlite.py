@@ -1,6 +1,5 @@
-
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 import sqlite3
 from datetime import datetime
 
@@ -48,6 +47,15 @@ def add_user(gender, weight, height, age, activity):
     return user_id
 
 
+def get_all_users():
+    conn = sqlite3.connect("calories.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, gender, age FROM users")
+    users = cursor.fetchall()
+    conn.close()
+    return users
+
+
 def add_product(user_id, product, calories):
     conn = sqlite3.connect("calories.db")
     cursor = conn.cursor()
@@ -64,7 +72,7 @@ class CalorieApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Калькулятор калорій з базою даних")
-        self.root.geometry("400x650")
+        self.root.geometry("400x700")
 
         init_db()
         self.user_id = None
@@ -93,11 +101,35 @@ class CalorieApp:
         self.activity_var = tk.StringVar(value="сидячий")
         tk.Entry(self.root, textvariable=self.activity_var).pack()
 
-        tk.Button(self.root, text="Почати",
-                  command=self.register_user).pack(pady=10)
+        tk.Button(self.root, text="Почати як новий користувач",
+                  command=self.register_user).pack(pady=5)
+
+        tk.Label(self.root, text="Або виберіть користувача:").pack()
+        self.user_select = ttk.Combobox(self.root, state="readonly")
+        self.refresh_users()
+        self.user_select.pack()
+
+        tk.Button(self.root, text="Увійти як вибраний користувач",
+                  command=self.select_existing_user).pack(pady=5)
 
         self.result_label = tk.Label(self.root, text="")
         self.result_label.pack()
+
+    def refresh_users(self):
+        users = get_all_users()
+        self.users_dict = {
+            f"ID: {u[0]}, Стать: {u[1]}, Вік: {u[2]}": u[0] for u in users}
+        self.user_select["values"] = list(self.users_dict.keys())
+
+    def select_existing_user(self):
+        selected = self.user_select.get()
+        if selected:
+            self.user_id = self.users_dict[selected]
+            self.result_label.config(
+                text=f"Увійшли як користувач (ID: {self.user_id})")
+            self.build_entry_form()
+        else:
+            messagebox.showwarning("Увага", "Оберіть користувача зі списку.")
 
     def register_user(self):
         try:
@@ -110,6 +142,7 @@ class CalorieApp:
             self.user_id = add_user(gender, weight, height, age, activity)
             self.result_label.config(
                 text=f"Користувач створений (ID: {self.user_id})")
+            self.refresh_users()
             self.build_entry_form()
         except ValueError:
             messagebox.showerror("Помилка", "Невірні дані користувача.")
