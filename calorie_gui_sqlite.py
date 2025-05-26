@@ -65,6 +65,16 @@ def add_product(user_id, product, calories):
     conn.commit()
     conn.close()
 
+
+def get_user_entries(user_id):
+    conn = sqlite3.connect("calories.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT product, calories, date FROM entries WHERE user_id = ? ORDER BY date DESC", (user_id,))
+    entries = cursor.fetchall()
+    conn.close()
+    return entries
+
 # ---------- GUI ----------
 
 
@@ -165,6 +175,18 @@ class CalorieApp:
         self.total_label = tk.Label(
             self.root, text="Загальна кількість калорій: 0")
         self.total_label.pack()
+
+        self.load_history()
+
+    def load_history(self):
+        entries = get_user_entries(self.user_id)
+        self.total_calories = 0
+        self.output.insert(tk.END, "Історія спожитих продуктів:\n")
+        for product, cal, date in entries:
+            self.output.insert(tk.END, f"{date}: {product} — {cal} ккал\n")
+            self.total_calories += cal
+        self.total_label.config(
+            text=f"Загальна кількість калорій: {self.total_calories}")
 
     def add_product_entry(self):
         if not self.user_id:
