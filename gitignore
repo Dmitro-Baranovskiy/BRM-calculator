@@ -3,6 +3,5 @@ calories.db
 venv/
 env/
 ENV/
-
 .vscode/
 .idea/
