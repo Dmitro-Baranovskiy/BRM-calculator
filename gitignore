@@ -1,19 +1,8 @@
-
-# Ігноруємо SQLite базу даних
 calories.db
-
-# Ігноруємо байт-код Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Ігноруємо середовище (якщо використовується)
 .env
 venv/
 env/
 ENV/
 
-# Ігноруємо файли IDE
 .vscode/
 .idea/
