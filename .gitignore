@@ -1,0 +1,22 @@
+
+# Ignore Sqlite db
+calories.db
+
+# Ignore Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore env
+.env
+venv/
+env/
+ENV/
+
+# Ignore IDE
+.vscode/
+.idea/
+
+# db files
+*.db
