@@ -1,10 +1,20 @@
 #!/bin/python
+
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox
 import sqlite3
+import json
+import os
 from datetime import datetime
 
-# ---------- БАЗА ДАНИХ ----------
+# ---------- I18N ----------
+
+
+def load_translations(lang="uk"):
+    with open(os.path.join("locales", f"{lang}.json"), "r", encoding="utf-8") as f:
+        return json.load(f)
+
+# ---------- database ----------
 
 
 def init_db():
@@ -51,7 +61,8 @@ def add_user(gender, weight, height, age, activity):
 def get_all_users():
     conn = sqlite3.connect("calories.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT id, gender, age FROM users")
+    cursor.execute(
+        "SELECT id, gender, weight, height, age, activity FROM users")
     users = cursor.fetchall()
     conn.close()
     return users
@@ -66,81 +77,110 @@ def add_product(user_id, product, calories):
     conn.commit()
     conn.close()
 
-
-def get_user_entries(user_id):
-    conn = sqlite3.connect("calories.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT product, calories, date FROM entries WHERE user_id = ? ORDER BY date DESC", (user_id,))
-    entries = cursor.fetchall()
-    conn.close()
-    return entries
-
 # ---------- GUI ----------
 
 
 class CalorieApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Калькулятор калорій з базою даних")
-        self.root.geometry("400x700")
+        self.root.title("Calorie App")
+        self.root.geometry("400x750")
+
+        self.language = "uk"
+        self.T = load_translations(self.language)
 
         init_db()
         self.user_id = None
         self.total_calories = 0
 
-        self.build_user_form()
+        self.build_language_switcher()
+        self.build_user_selector()
 
-    def build_user_form(self):
-        tk.Label(self.root, text="Стать (ч/ж):").pack()
-        self.gender_var = tk.StringVar(value="ж")
-        tk.Entry(self.root, textvariable=self.gender_var).pack()
+    def build_language_switcher(self):
+        frame = tk.Frame(self.root)
+        frame.pack(pady=5)
+        tk.Label(frame, text="🌐 Language:").pack(side=tk.LEFT)
+        tk.Button(frame, text="Українська",
+                  command=lambda: self.switch_language("uk")).pack(side=tk.LEFT)
+        tk.Button(frame, text="English", command=lambda: self.switch_language(
+            "en")).pack(side=tk.LEFT)
 
-        tk.Label(self.root, text="Вага (кг):").pack()
-        self.weight_entry = tk.Entry(self.root)
-        self.weight_entry.pack()
+    def switch_language(self, lang):
+        self.language = lang
+        self.T = load_translations(lang)
+        self.clear_gui()
+        self.build_language_switcher()
+        self.build_user_selector()
 
-        tk.Label(self.root, text="Зріст (см):").pack()
-        self.height_entry = tk.Entry(self.root)
-        self.height_entry.pack()
+    def clear_gui(self):
+        for widget in self.root.winfo_children():
+            widget.destroy()
 
-        tk.Label(self.root, text="Вік:").pack()
-        self.age_entry = tk.Entry(self.root)
-        self.age_entry.pack()
+    def build_user_selector(self):
+        tk.Label(self.root, text=self.T["title"], font=(
+            "Arial", 16, "bold")).pack(pady=10)
+        tk.Label(self.root, text=self.T["choose_user"]).pack()
 
-        tk.Label(self.root, text="Активність:").pack()
-        self.activity_var = tk.StringVar(value="сидячий")
-        tk.Entry(self.root, textvariable=self.activity_var).pack()
+        self.user_list = tk.Listbox(self.root, height=6)
+        self.user_list.pack()
+        self.load_users()
 
-        tk.Button(self.root, text="Почати як новий користувач",
-                  command=self.register_user).pack(pady=5)
-
-        tk.Label(self.root, text="Або виберіть користувача:").pack()
-        self.user_select = ttk.Combobox(self.root, state="readonly")
-        self.refresh_users()
-        self.user_select.pack()
-
-        tk.Button(self.root, text="Увійти як вибраний користувач",
-                  command=self.select_existing_user).pack(pady=5)
+        tk.Button(self.root, text=self.T["select_user"],
+                  command=self.select_user).pack(pady=5)
+        tk.Button(self.root, text=self.T["create_user"],
+                  command=self.build_user_form).pack(pady=5)
 
         self.result_label = tk.Label(self.root, text="")
         self.result_label.pack()
 
-    def refresh_users(self):
+    def load_users(self):
+        self.user_list.delete(0, tk.END)
         users = get_all_users()
-        self.users_dict = {
-            f"ID: {u[0]}, Стать: {u[1]}, Вік: {u[2]}": u[0] for u in users}
-        self.user_select["values"] = list(self.users_dict.keys())
+        for user in users:
+            label = f"ID {user[0]}: {user[1]}, {user[2]}кг, {user[4]} років"
+            self.user_list.insert(tk.END, label)
 
-    def select_existing_user(self):
-        selected = self.user_select.get()
-        if selected:
-            self.user_id = self.users_dict[selected]
-            self.result_label.config(
-                text=f"Увійшли як користувач (ID: {self.user_id})")
+    def select_user(self):
+        selection = self.user_list.curselection()
+        if selection:
+            index = selection[0]
+            user_data = get_all_users()[index]
+            self.user_id = user_data[0]
+            self.result_label.config(text=f"ID: {self.user_id}")
+            self.clear_gui()
+            self.build_language_switcher()
             self.build_entry_form()
         else:
-            messagebox.showwarning("Увага", "Оберіть користувача зі списку.")
+            messagebox.showwarning("!", self.T["select_user"])
+
+    def build_user_form(self):
+        self.clear_gui()
+        self.build_language_switcher()
+
+        tk.Label(self.root, text=self.T["title"], font=(
+            "Arial", 16, "bold")).pack(pady=10)
+        tk.Label(self.root, text=self.T["gender"]).pack()
+        self.gender_var = tk.StringVar(value="ж")
+        tk.Entry(self.root, textvariable=self.gender_var).pack()
+
+        tk.Label(self.root, text=self.T["weight"]).pack()
+        self.weight_entry = tk.Entry(self.root)
+        self.weight_entry.pack()
+
+        tk.Label(self.root, text=self.T["height"]).pack()
+        self.height_entry = tk.Entry(self.root)
+        self.height_entry.pack()
+
+        tk.Label(self.root, text=self.T["age"]).pack()
+        self.age_entry = tk.Entry(self.root)
+        self.age_entry.pack()
+
+        tk.Label(self.root, text=self.T["activity"]).pack()
+        self.activity_var = tk.StringVar(value="сидячий")
+        tk.Entry(self.root, textvariable=self.activity_var).pack()
+
+        tk.Button(self.root, text=self.T["save_user"],
+                  command=self.register_user).pack(pady=10)
 
     def register_user(self):
         try:
@@ -151,47 +191,35 @@ class CalorieApp:
             activity = self.activity_var.get()
 
             self.user_id = add_user(gender, weight, height, age, activity)
-            self.result_label.config(
-                text=f"Користувач створений (ID: {self.user_id})")
-            self.refresh_users()
+            self.result_label.config(text=f"ID: {self.user_id}")
+            self.clear_gui()
+            self.build_language_switcher()
             self.build_entry_form()
         except ValueError:
-            messagebox.showerror("Помилка", "Невірні дані користувача.")
+            messagebox.showerror("!", "Дані невалідні!")
 
     def build_entry_form(self):
-        tk.Label(self.root, text="Назва продукту:").pack()
+        tk.Label(self.root, text=self.T["product_name"]).pack()
         self.product_name = tk.StringVar()
         tk.Entry(self.root, textvariable=self.product_name).pack()
 
-        tk.Label(self.root, text="Калорії:").pack()
+        tk.Label(self.root, text=self.T["calories"]).pack()
         self.product_calories = tk.StringVar()
         tk.Entry(self.root, textvariable=self.product_calories).pack()
 
-        tk.Button(self.root, text="Додати продукт",
+        tk.Button(self.root, text=self.T["add_product"],
                   command=self.add_product_entry).pack(pady=5)
 
         self.output = tk.Text(self.root, height=10, width=40)
         self.output.pack()
 
         self.total_label = tk.Label(
-            self.root, text="Загальна кількість калорій: 0")
+            self.root, text=f"{self.T['total_calories']} 0")
         self.total_label.pack()
-
-        self.load_history()
-
-    def load_history(self):
-        entries = get_user_entries(self.user_id)
-        self.total_calories = 0
-        self.output.insert(tk.END, "Історія спожитих продуктів:\n")
-        for product, cal, date in entries:
-            self.output.insert(tk.END, f"{date}: {product} — {cal} ккал\n")
-            self.total_calories += cal
-        self.total_label.config(
-            text=f"Загальна кількість калорій: {self.total_calories}")
 
     def add_product_entry(self):
         if not self.user_id:
-            messagebox.showerror("Помилка", "Спочатку зареєструй користувача.")
+            messagebox.showerror("!", "Обери користувача!")
             return
         try:
             name = self.product_name.get()
@@ -200,11 +228,11 @@ class CalorieApp:
             self.total_calories += cal
             self.output.insert(tk.END, f"{name}: {cal} ккал\n")
             self.total_label.config(
-                text=f"Загальна кількість калорій: {self.total_calories}")
+                text=f"{self.T['total_calories']} {self.total_calories}")
             self.product_name.set("")
             self.product_calories.set("")
         except ValueError:
-            messagebox.showerror("Помилка", "Невірна кількість калорій.")
+            messagebox.showerror("!", "Помилка вводу калорій.")
 
 
 if __name__ == "__main__":
