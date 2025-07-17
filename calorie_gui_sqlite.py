@@ -1,7 +1,7 @@
 #!/bin/python
 
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import ttk, messagebox
 import sqlite3
 import json
 import os
@@ -42,6 +42,9 @@ def load_translations(lang="uk"):
 
 
 # SQ database
+
+DB_PATH = "calories.db"
+
 
 def init_db():
     conn = sqlite3.connect("calories.db")
@@ -85,29 +88,29 @@ def get_all_users():
     return users
 
 
-def add_product(user_id, product, calories):
-    conn = sqlite3.connect("calories.db")
+def add_entry(user_id, product, calories):
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    date = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now().strftime("%Y-%m-%d")
     c.execute("""
-        INSERT INTO entries (user_id, product, calories, date)
-        VALUES (?, ?, ?, ?)
-    """, (user_id, product, calories, date))
+      INSERT INTO entries (user_id, product, calories, date)
+      VALUES (?, ?, ?, ?)
+    """, (user_id, product, calories, today))
     conn.commit()
     conn.close()
 
 
-def load_today_total(user_id):
-    conn = sqlite3.connect("calories.db")
+def load_today_entries(user_id):
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     today = datetime.now().strftime("%Y-%m-%d")
     c.execute("""
-        SELECT SUM(calories) FROM entries
-        WHERE user_id=? AND date=?
+      SELECT product, calories FROM entries
+      WHERE user_id=? AND date=?
     """, (user_id, today))
-    total = c.fetchone()[0] or 0
+    rows = c.fetchall()
     conn.close()
-    return total
+    return rows
 
 
 #  GUI
@@ -116,184 +119,263 @@ class CalorieApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Calorie App")
-        self.root.geometry("400x750")
+        self.root.geometry("500x500")
 
         init_db()
-        self.user_id = None
-        self.total_calories = 0
 
-        # load translations
+        # Localization
         self.translations = {
-            lang: load_translations(lang) for lang in ("uk", "en")
+            "uk": load_translations("uk"),
+            "en": load_translations("en")
         }
-        self.language = "uk"
-        self.T = self.translations[self.language]
+        self.lang = "uk"
+        self.T = self.translations[self.lang]
 
-        self.build_language_switcher()
-        self.build_user_selector()
+        # Style
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
 
-    def reset_gui_and(self, build_func):
-        self.clear_gui()
+        # Variables
+        self.user_id = None
+        self.bmr = 0
+        self.tdee = 0
+        self.total_cal = tk.DoubleVar(value=0)
+
+        self.gender_var = tk.StringVar()
+        self.weight_var = tk.DoubleVar()
+        self.height_var = tk.DoubleVar()
+        self.age_var = tk.IntVar()
+        self.activity_var = tk.StringVar()
+
+        self.product_var = tk.StringVar()
+        self.cal_var = tk.DoubleVar()
+
+        # Building GUI
         self.build_language_switcher()
-        build_func()
+        self.build_ui()
 
     def build_language_switcher(self):
-        frame = tk.Frame(self.root)
-        frame.pack(pady=5)
-        tk.Label(frame, text="🌐 Language:").pack(side=tk.LEFT)
-        tk.Button(frame, text="Українська",
-                  command=lambda: self.switch_language("uk")
-                  ).pack(side=tk.LEFT)
-        tk.Button(frame, text="English",
-                  command=lambda: self.switch_language("en")
-                  ).pack(side=tk.LEFT)
+        frame = ttk.Frame(self.root)
+        frame.pack(fill="x", pady=5)
+        ttk.Label(frame, text="🌐").pack(side="left")
+        ttk.Button(frame, text="Українська",
+                   command=lambda: self.switch_lang("uk")
+                   ).pack(side="left", padx=2)
+        ttk.Button(frame, text="English",
+                   command=lambda: self.switch_lang("en")
+                   ).pack(side="left")
 
-    def switch_language(self, lang):
-        self.language = lang
+    def switch_lang(self, lang):
+        self.lang = lang
         self.T = self.translations[lang]
-        self.reset_gui_and(self.build_user_selector)
 
-    def clear_gui(self):
-        for w in self.root.winfo_children():
-            w.destroy()
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        self.__init__(self.root)
 
-    def build_user_selector(self):
-        tk.Label(self.root, text=self.T["title"],
-                 font=("Arial", 16, "bold")
-                 ).pack(pady=10)
+    def build_ui(self):
+        # Tabs
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(expand=True, fill="both")
 
-        tk.Label(self.root, text=self.T["choose_user"]).pack()
+        self.tab_user = ttk.Frame(self.notebook, padding=10)
+        self.tab_entry = ttk.Frame(self.notebook, padding=10)
 
-        self.user_list = tk.Listbox(self.root, height=6)
-        self.user_list.pack()
-        self.load_users()
+        self.notebook.add(self.tab_user,  text=self.T["tab_user"])
+        self.notebook.add(self.tab_entry, text=self.T["tab_entry"])
 
-        tk.Button(self.root, text=self.T["select_user"],
-                  command=self.select_user
-                  ).pack(pady=5)
-        tk.Button(self.root, text=self.T["create_user"],
-                  command=lambda: self.reset_gui_and(self.build_user_form)
-                  ).pack(pady=5)
+        self.build_user_tab()
+        self.build_entry_tab()
 
-        self.result_label = tk.Label(self.root, text="")
-        self.result_label.pack()
+    def build_user_tab(self):
+        # User selection frame
+        sf = ttk.LabelFrame(self.tab_user, text=self.T["choose_user"])
+        sf.pack(fill="x", pady=5)
 
-    def load_users(self):
-        self.user_list.delete(0, tk.END)
-        for u in get_all_users():
-            uid, g, w, h, age, act = u
-            label = f"ID {uid}: {g}, {w}кг, {h}см, {age}р, {act}"
-            self.user_list.insert(tk.END, label)
+        self.user_list = ttk.Combobox(
+            sf, state="readonly", width=50
+        )
+        self.user_list.pack(side="left", padx=5)
+        self.refresh_user_list()
+
+        ttk.Button(
+            sf, text=self.T["select_user"],
+            command=self.select_user
+        ).pack(side="left", padx=5)
+
+        # Create new user form
+        cf = ttk.LabelFrame(self.tab_user, text=self.T["create_user"])
+        cf.pack(fill="x", pady=10)
+
+        # Gender
+        ttk.Label(cf, text=self.T["gender"]).grid(
+            row=0, column=0, sticky="w", pady=2)
+        gender_cb = ttk.Combobox(
+            cf, values=[self.T["male"], self.T["female"]],
+            state="readonly", textvariable=self.gender_var
+        )
+        gender_cb.grid(row=0, column=1, sticky="ew", padx=5)
+
+        # Weight
+        ttk.Label(cf, text=self.T["weight"]).grid(
+            row=1, column=0, sticky="w", pady=2)
+        ttk.Entry(cf, textvariable=self.weight_var).grid(
+            row=1, column=1, sticky="ew", padx=5)
+
+        # Hight
+        ttk.Label(cf, text=self.T["height"]).grid(
+            row=2, column=0, sticky="w", pady=2)
+        ttk.Entry(cf, textvariable=self.height_var).grid(
+            row=2, column=1, sticky="ew", padx=5)
+
+        # Age
+        ttk.Label(cf, text=self.T["age"]).grid(
+            row=3, column=0, sticky="w", pady=2)
+        ttk.Entry(cf, textvariable=self.age_var).grid(
+            row=3, column=1, sticky="ew", padx=5)
+
+        # Activity level
+        ttk.Label(cf, text=self.T["activity"]).grid(
+            row=4, column=0, sticky="w", pady=2)
+        act_cb = ttk.Combobox(
+            cf,
+            values=[
+                self.T["sedentary"], self.T["light"],
+                self.T["moderate"], self.T["active"],
+                self.T["very_active"]
+            ],
+            state="readonly",
+            textvariable=self.activity_var
+        )
+        act_cb.grid(row=4, column=1, sticky="ew", padx=5)
+
+        cf.columnconfigure(1, weight=1)
+
+        ttk.Button(
+            cf, text=self.T["save_user"],
+            command=self.register_user
+        ).grid(row=5, column=0, columnspan=2, pady=10)
+
+    def refresh_user_list(self):
+        users = get_all_users()
+        labels = [
+            f"ID {u[0]}: {u[1]}, {u[2]}кг, {u[3]}см, {u[4]}р, {u[5]}"
+            for u in users
+        ]
+        self.user_list['values'] = labels
 
     def select_user(self):
-        sel = self.user_list.curselection()
-        if not sel:
-            messagebox.showwarning("!", self.T["select_user"])
+        idx = self.user_list.current()
+        if idx < 0:
+            messagebox.showwarning(self.T["title"], self.T["choose_user"])
             return
 
-        idx = sel[0]
         u = get_all_users()[idx]
         self.user_id = u[0]
-        self.result_label.config(text=f"ID: {self.user_id}")
+        gender, w, h, age, act = u[1], u[2], u[3], u[4], u[5]
 
-        # Load total calories for today
-        self.total_calories = load_today_total(self.user_id)
+        self.bmr = calc_bmr(w, h, age, gender)
+        self.tdee = calc_tdee(self.bmr, act)
+        self.total_cal.set(
+            sum(cal for _, cal in load_today_entries(self.user_id))
+        )
 
-        self.reset_gui_and(self.build_entry_form)
-
-    def build_user_form(self):
-        tk.Label(self.root, text=self.T["title"],
-                 font=("Arial", 16, "bold")
-                 ).pack(pady=10)
-
-        tk.Label(self.root, text=self.T["gender"]).pack()
-        self.gender_var = tk.StringVar(value="ж")
-        tk.Entry(self.root, textvariable=self.gender_var).pack()
-
-        tk.Label(self.root, text=self.T["weight"]).pack()
-        self.weight_entry = tk.Entry(self.root)
-        self.weight_entry.pack()
-
-        tk.Label(self.root, text=self.T["height"]).pack()
-        self.height_entry = tk.Entry(self.root)
-        self.height_entry.pack()
-
-        tk.Label(self.root, text=self.T["age"]).pack()
-        self.age_entry = tk.Entry(self.root)
-        self.age_entry.pack()
-
-        tk.Label(self.root, text=self.T["activity"]).pack()
-        self.activity_var = tk.StringVar(value="сидячий")
-        tk.Entry(self.root, textvariable=self.activity_var).pack()
-
-        tk.Button(self.root, text=self.T["save_user"],
-                  command=self.register_user
-                  ).pack(pady=10)
+        messagebox.showinfo(
+            self.T["title"],
+            f"{self.T['bmr']}: {self.bmr:.0f} ккал\n"
+            f"{self.T['tdee']}: {self.tdee:.0f} ккал/день"
+        )
+        self.load_entries_into_tab()
 
     def register_user(self):
         try:
-            gender = self.gender_var.get()
-            weight = float(self.weight_entry.get())
-            height = float(self.height_entry.get())
-            age = int(self.age_entry.get())
-            activity = self.activity_var.get()
+            g = self.gender_var.get()
+            w = self.weight_var.get()
+            h = self.height_var.get()
+            a = self.age_var.get()
+            act = self.activity_var.get()
+        except tk.TclError:
+            messagebox.showerror(self.T["title"], self.T["invalid_data"])
+            return
 
-            self.user_id = add_user(gender, weight, height, age, activity)
+        if not all([g, w, h, a, act]):
+            messagebox.showerror(self.T["title"], self.T["invalid_data"])
+            return
 
-            # Show BMR and TDEE after registration
-            bmr = calc_bmr(weight, height, age, gender)
-            tdee = calc_tdee(bmr, activity)
-            messagebox.showinfo(
-                self.T["title"],
-                f"{self.T['bmr']}: {bmr:.0f} ккал\n{self.T['tdee']}: {tdee:.0f} ккал/день"
-            )
+        uid = add_user(g, w, h, a, act)
+        self.refresh_user_list()
+        self.user_list.current(len(self.user_list['values']) - 1)
+        self.select_user()
 
-            # reset calculator
-            self.total_calories = 0
-            self.reset_gui_and(self.build_entry_form)
+    def build_entry_tab(self):
+        ff = ttk.LabelFrame(self.tab_entry, text=self.T["product_name"])
+        ff.pack(fill="x", pady=5)
 
-        except ValueError:
-            messagebox.showerror("!", self.T["invalid_data"])
+        ttk.Label(ff, text=self.T["product_name"]).grid(
+            row=0, column=0, sticky="w")
+        ttk.Entry(ff, textvariable=self.product_var).grid(
+            row=0, column=1, sticky="ew", padx=5)
 
-    def build_entry_form(self):
-        tk.Label(self.root, text=self.T["product_name"]).pack()
-        self.product_name = tk.StringVar()
-        tk.Entry(self.root, textvariable=self.product_name).pack()
+        ttk.Label(ff, text=self.T["calories"]).grid(
+            row=1, column=0, sticky="w", pady=5)
+        ttk.Entry(ff, textvariable=self.cal_var).grid(
+            row=1, column=1, sticky="ew", padx=5)
 
-        tk.Label(self.root, text=self.T["calories"]).pack()
-        self.product_calories = tk.StringVar()
-        tk.Entry(self.root, textvariable=self.product_calories).pack()
+        ff.columnconfigure(1, weight=1)
 
-        tk.Button(self.root, text=self.T["add_product"],
-                  command=self.add_product_entry
-                  ).pack(pady=5)
+        ttk.Button(
+            ff, text=self.T["add_product"],
+            command=self.add_product_entry
+        ).grid(row=2, column=0, columnspan=2, pady=10)
 
-        self.output = tk.Text(self.root, height=10, width=40)
-        self.output.pack()
+        # History output
+        hist = ttk.LabelFrame(self.tab_entry, text=self.T["total_calories"])
+        hist.pack(fill="both", expand=True, pady=5)
 
-        self.total_label = tk.Label(
-            self.root,
-            text=f"{self.T['total_calories']} {self.total_calories}"
-        )
-        self.total_label.pack()
+        self.output = tk.Text(hist, height=10)
+        self.output.pack(fill="both", expand=True, padx=5, pady=5)
+
+        ttk.Label(
+            hist,
+            textvariable=self.total_cal,
+            font=("Arial", 14, "bold")
+        ).pack(pady=5)
+
+        self.load_entries_into_tab()
+
+    def load_entries_into_tab(self):
+        if self.user_id is None:
+            return
+        self.output.delete("1.0", tk.END)
+        entries = load_today_entries(self.user_id)
+        total = 0
+        for prod, cal in entries:
+            self.output.insert(tk.END, f"{prod}: {cal:.0f} ккал\n")
+            total += cal
+        self.total_cal.set(total)
 
     def add_product_entry(self):
-        if not self.user_id:
-            messagebox.showerror("!", self.T["choose_user"])
+        if self.user_id is None:
+            messagebox.showerror(self.T["title"], self.T["choose_user"])
             return
         try:
-            name = self.product_name.get()
-            cal = float(self.product_calories.get())
-            add_product(self.user_id, name, cal)
-            self.total_calories += cal
-            self.output.insert(tk.END, f"{name}: {cal} ккал\n")
-            self.total_label.config(
-                text=f"{self.T['total_calories']} {self.total_calories}"
-            )
-            self.product_name.set("")
-            self.product_calories.set("")
-        except ValueError:
-            messagebox.showerror("!", self.T["invalid_cal"])
+            prod = self.product_var.get()
+            cal = self.cal_var.get()
+        except tk.TclError:
+            messagebox.showerror(self.T["title"], self.T["invalid_cal"])
+            return
+
+        if not prod or cal <= 0:
+            messagebox.showerror(self.T["title"], self.T["invalid_cal"])
+            return
+
+        add_entry(self.user_id, prod, cal)
+        self.product_var.set("")
+        self.cal_var.set(0)
+        self.load_entries_into_tab()
+
+
+# Start the application
 
 
 if __name__ == "__main__":
