@@ -7,6 +7,8 @@ import json
 import os
 from datetime import datetime
 
+DB_PATH = "calories.db"
+
 # BMR & TDEE formulas
 
 activity_map = {
@@ -43,59 +45,68 @@ def load_translations(lang="uk"):
 
 # SQ database
 
-DB_PATH = "calories.db"
-
-
 def init_db():
-    conn = sqlite3.connect("calories.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
+      CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        gender TEXT, weight REAL, height REAL,
-        age INTEGER, activity TEXT
-    )""")
+        gender TEXT, weight REAL,
+        height REAL, age INTEGER,
+        activity TEXT
+      )
+    """)
     c.execute("""
-    CREATE TABLE IF NOT EXISTS entries (
+      CREATE TABLE IF NOT EXISTS entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER, product TEXT,
-        calories REAL, date TEXT,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )""")
+        grams REAL, calories REAL, date TEXT,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+      )
+    """)
     conn.commit()
     conn.close()
 
 
 def add_user(gender, weight, height, age, activity):
-    conn = sqlite3.connect("calories.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
-        INSERT INTO users (gender, weight, height, age, activity)
-        VALUES (?, ?, ?, ?, ?)
+      INSERT INTO users (gender, weight, height, age, activity)
+      VALUES (?, ?, ?, ?, ?)
     """, (gender, weight, height, age, activity))
-    conn.commit()
     uid = c.lastrowid
+    conn.commit()
     conn.close()
     return uid
 
 
+def delete_user_db(user_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM entries WHERE user_id=?", (user_id,))
+    c.execute("DELETE FROM users   WHERE id=?",      (user_id,))
+    conn.commit()
+    conn.close()
+
+
 def get_all_users():
-    conn = sqlite3.connect("calories.db")
+    conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, gender, weight, height, age, activity FROM users")
-    users = c.fetchall()
+    rows = c.fetchall()
     conn.close()
-    return users
+    return rows
 
 
-def add_entry(user_id, product, calories):
+def add_entry(user_id, product, grams, calories):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     today = datetime.now().strftime("%Y-%m-%d")
     c.execute("""
-      INSERT INTO entries (user_id, product, calories, date)
-      VALUES (?, ?, ?, ?)
-    """, (user_id, product, calories, today))
+      INSERT INTO entries (user_id, product, grams, calories, date)
+      VALUES (?, ?, ?, ?, ?)
+    """, (user_id, product, grams, calories, today))
     conn.commit()
     conn.close()
 
@@ -105,7 +116,7 @@ def load_today_entries(user_id):
     c = conn.cursor()
     today = datetime.now().strftime("%Y-%m-%d")
     c.execute("""
-      SELECT product, calories FROM entries
+      SELECT product, grams, calories FROM entries
       WHERE user_id=? AND date=?
     """, (user_id, today))
     rows = c.fetchall()
@@ -119,7 +130,7 @@ class CalorieApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Calorie App")
-        self.root.geometry("500x500")
+        self.root.geometry("550x550")
 
         init_db()
 
@@ -148,7 +159,8 @@ class CalorieApp:
         self.activity_var = tk.StringVar()
 
         self.product_var = tk.StringVar()
-        self.cal_var = tk.DoubleVar()
+        self.grams_var = tk.DoubleVar()
+        self.cal100_var = tk.DoubleVar()
 
         # Building GUI
         self.build_language_switcher()
@@ -169,12 +181,12 @@ class CalorieApp:
         self.lang = lang
         self.T = self.translations[lang]
 
-        for widget in self.root.winfo_children():
-            widget.destroy()
-        self.__init__(self.root)
+        for w in self.root.winfo_children():
+            w.destroy()
+        self.build_language_switcher()
+        self.build_ui()
 
     def build_ui(self):
-        # Tabs
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(expand=True, fill="both")
 
@@ -187,74 +199,59 @@ class CalorieApp:
         self.build_user_tab()
         self.build_entry_tab()
 
+    # User management tab
     def build_user_tab(self):
-        # User selection frame
         sf = ttk.LabelFrame(self.tab_user, text=self.T["choose_user"])
         sf.pack(fill="x", pady=5)
 
-        self.user_list = ttk.Combobox(
-            sf, state="readonly", width=50
-        )
+        self.user_list = ttk.Combobox(sf, state="readonly", width=60)
         self.user_list.pack(side="left", padx=5)
         self.refresh_user_list()
 
-        ttk.Button(
-            sf, text=self.T["select_user"],
-            command=self.select_user
-        ).pack(side="left", padx=5)
+        ttk.Button(sf, text=self.T["select_user"],
+                   command=self.select_user
+                   ).pack(side="left", padx=5)
+        ttk.Button(sf, text=self.T["delete_user"],
+                   command=self.on_delete_user
+                   ).pack(side="left", padx=5)
 
-        # Create new user form
         cf = ttk.LabelFrame(self.tab_user, text=self.T["create_user"])
         cf.pack(fill="x", pady=10)
 
-        # Gender
-        ttk.Label(cf, text=self.T["gender"]).grid(
+        ttk.Label(cf, text=self.T["gender"]) .grid(
             row=0, column=0, sticky="w", pady=2)
-        gender_cb = ttk.Combobox(
-            cf, values=[self.T["male"], self.T["female"]],
-            state="readonly", textvariable=self.gender_var
-        )
-        gender_cb.grid(row=0, column=1, sticky="ew", padx=5)
+        ttk.Combobox(cf,
+                     values=[self.T["male"], self.T["female"]],
+                     state="readonly",
+                     textvariable=self.gender_var
+                     ).grid(row=0, column=1, sticky="ew", padx=5)
 
-        # Weight
-        ttk.Label(cf, text=self.T["weight"]).grid(
-            row=1, column=0, sticky="w", pady=2)
-        ttk.Entry(cf, textvariable=self.weight_var).grid(
-            row=1, column=1, sticky="ew", padx=5)
+        for i, (lbl, var) in enumerate([
+            (self.T["weight"], self.weight_var),
+            (self.T["height"], self.height_var),
+            (self.T["age"], self.age_var)
+        ], start=1):
+            ttk.Label(cf, text=lbl).grid(row=i, column=0, sticky="w", pady=2)
+            ttk.Entry(cf, textvariable=var).grid(
+                row=i, column=1, sticky="ew", padx=5)
 
-        # Hight
-        ttk.Label(cf, text=self.T["height"]).grid(
-            row=2, column=0, sticky="w", pady=2)
-        ttk.Entry(cf, textvariable=self.height_var).grid(
-            row=2, column=1, sticky="ew", padx=5)
-
-        # Age
-        ttk.Label(cf, text=self.T["age"]).grid(
-            row=3, column=0, sticky="w", pady=2)
-        ttk.Entry(cf, textvariable=self.age_var).grid(
-            row=3, column=1, sticky="ew", padx=5)
-
-        # Activity level
-        ttk.Label(cf, text=self.T["activity"]).grid(
+        ttk.Label(cf, text=self.T["activity"]) .grid(
             row=4, column=0, sticky="w", pady=2)
-        act_cb = ttk.Combobox(
-            cf,
-            values=[
-                self.T["sedentary"], self.T["light"],
-                self.T["moderate"], self.T["active"],
-                self.T["very_active"]
-            ],
-            state="readonly",
-            textvariable=self.activity_var
-        )
-        act_cb.grid(row=4, column=1, sticky="ew", padx=5)
+        ttk.Combobox(cf,
+                     values=[
+                         self.T["sedentary"], self.T["light"],
+                         self.T["moderate"], self.T["active"],
+                         self.T["very_active"]
+                     ],
+                     state="readonly",
+                     textvariable=self.activity_var
+                     ).grid(row=4, column=1, sticky="ew", padx=5)
 
         cf.columnconfigure(1, weight=1)
 
-        ttk.Button(
-            cf, text=self.T["save_user"],
-            command=self.register_user
-        ).grid(row=5, column=0, columnspan=2, pady=10)
+        ttk.Button(cf, text=self.T["save_user"],
+                   command=self.register_user
+                   ).grid(row=5, column=0, columnspan=2, pady=10)
 
     def refresh_user_list(self):
         users = get_all_users()
@@ -271,13 +268,11 @@ class CalorieApp:
             return
 
         u = get_all_users()[idx]
-        self.user_id = u[0]
-        gender, w, h, age, act = u[1], u[2], u[3], u[4], u[5]
-
-        self.bmr = calc_bmr(w, h, age, gender)
+        self.user_id, g, w, h, age, act = u
+        self.bmr = calc_bmr(w, h, age, g)
         self.tdee = calc_tdee(self.bmr, act)
         self.total_cal.set(
-            sum(cal for _, cal in load_today_entries(self.user_id))
+            sum(cal for _, _, cal in load_today_entries(self.user_id))
         )
 
         messagebox.showinfo(
@@ -287,96 +282,116 @@ class CalorieApp:
         )
         self.load_entries_into_tab()
 
-    def register_user(self):
-        try:
-            g = self.gender_var.get()
-            w = self.weight_var.get()
-            h = self.height_var.get()
-            a = self.age_var.get()
-            act = self.activity_var.get()
-        except tk.TclError:
-            messagebox.showerror(self.T["title"], self.T["invalid_data"])
+    def on_delete_user(self):
+        idx = self.user_list.current()
+        if idx < 0:
+            messagebox.showwarning(self.T["title"], self.T["choose_user"])
+            return
+        if not messagebox.askyesno(
+            self.T["title"], self.T["confirm_delete_user"]
+        ):
             return
 
+        uid = get_all_users()[idx][0]
+        delete_user_db(uid)
+        self.user_id = None
+        self.refresh_user_list()
+        if hasattr(self, "output"):
+            self.output.delete("1.0", tk.END)
+        self.total_cal.set(0)
+        messagebox.showinfo(self.T["title"], self.T["user_deleted"])
+
+    def register_user(self):
+        try:
+            g, w, h, a, act = (
+                self.gender_var.get(), self.weight_var.get(),
+                self.height_var.get(), self.age_var.get(),
+                self.activity_var.get()
+            )
+        except tk.TclError:
+            return messagebox.showerror(self.T["title"], self.T["invalid_data"])
         if not all([g, w, h, a, act]):
-            messagebox.showerror(self.T["title"], self.T["invalid_data"])
-            return
+            return messagebox.showerror(self.T["title"], self.T["invalid_data"])
 
         uid = add_user(g, w, h, a, act)
         self.refresh_user_list()
         self.user_list.current(len(self.user_list['values']) - 1)
         self.select_user()
 
+    # Tab for adding food entries
     def build_entry_tab(self):
-        ff = ttk.LabelFrame(self.tab_entry, text=self.T["product_name"])
+        ff = ttk.LabelFrame(self.tab_entry, text=self.T["add_entry"])
         ff.pack(fill="x", pady=5)
 
-        ttk.Label(ff, text=self.T["product_name"]).grid(
+        ttk.Label(ff, text=self.T["product_name"]) .grid(
             row=0, column=0, sticky="w")
-        ttk.Entry(ff, textvariable=self.product_var).grid(
+        ttk.Entry(ff, textvariable=self.product_var) .grid(
             row=0, column=1, sticky="ew", padx=5)
 
-        ttk.Label(ff, text=self.T["calories"]).grid(
+        ttk.Label(ff, text=self.T["grams"]) .grid(
             row=1, column=0, sticky="w", pady=5)
-        ttk.Entry(ff, textvariable=self.cal_var).grid(
+        ttk.Entry(ff, textvariable=self.grams_var) .grid(
             row=1, column=1, sticky="ew", padx=5)
 
+        ttk.Label(ff, text=self.T["cal100"]) .grid(
+            row=2, column=0, sticky="w", pady=5)
+        ttk.Entry(ff, textvariable=self.cal100_var) .grid(
+            row=2, column=1, sticky="ew", padx=5)
+
         ff.columnconfigure(1, weight=1)
+        ttk.Button(ff, text=self.T["add_product"],
+                   command=self.add_product_entry
+                   ).grid(row=3, column=0, columnspan=2, pady=10)
 
-        ttk.Button(
-            ff, text=self.T["add_product"],
-            command=self.add_product_entry
-        ).grid(row=2, column=0, columnspan=2, pady=10)
-
-        # History output
         hist = ttk.LabelFrame(self.tab_entry, text=self.T["total_calories"])
         hist.pack(fill="both", expand=True, pady=5)
 
         self.output = tk.Text(hist, height=10)
         self.output.pack(fill="both", expand=True, padx=5, pady=5)
 
-        ttk.Label(
-            hist,
-            textvariable=self.total_cal,
-            font=("Arial", 14, "bold")
-        ).pack(pady=5)
+        ttk.Label(hist,
+                  textvariable=self.total_cal,
+                  font=("Arial", 14, "bold")
+                  ).pack(pady=5)
 
         self.load_entries_into_tab()
 
     def load_entries_into_tab(self):
-        if self.user_id is None:
-            return
         self.output.delete("1.0", tk.END)
-        entries = load_today_entries(self.user_id)
+        if self.user_id is None:
+            self.total_cal.set(0)
+            return
+
+        rows = load_today_entries(self.user_id)
         total = 0
-        for prod, cal in entries:
-            self.output.insert(tk.END, f"{prod}: {cal:.0f} ккал\n")
+        for prod, grams, cal in rows:
+            self.output.insert(
+                tk.END,
+                f"{prod}: {grams:.0f} г → {cal:.0f} ккал\n"
+            )
             total += cal
         self.total_cal.set(total)
 
     def add_product_entry(self):
         if self.user_id is None:
-            messagebox.showerror(self.T["title"], self.T["choose_user"])
-            return
-        try:
-            prod = self.product_var.get()
-            cal = self.cal_var.get()
-        except tk.TclError:
-            messagebox.showerror(self.T["title"], self.T["invalid_cal"])
-            return
+            return messagebox.showerror(self.T["title"], self.T["choose_user"])
 
-        if not prod or cal <= 0:
-            messagebox.showerror(self.T["title"], self.T["invalid_cal"])
-            return
+        prod = self.product_var.get()
+        grams = self.grams_var.get()
+        cal100 = self.cal100_var.get()
+        if not prod or grams <= 0 or cal100 <= 0:
+            return messagebox.showerror(self.T["title"], self.T["invalid_cal"])
 
-        add_entry(self.user_id, prod, cal)
+        calories = grams * cal100 / 100
+        add_entry(self.user_id, prod, grams, calories)
+
         self.product_var.set("")
-        self.cal_var.set(0)
+        self.grams_var.set(0)
+        self.cal100_var.set(0)
         self.load_entries_into_tab()
 
 
 # Start the application
-
 
 if __name__ == "__main__":
     root = tk.Tk()

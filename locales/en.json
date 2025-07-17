@@ -25,5 +25,13 @@
     "calories": "Calories (kcal)",
     "add_product": "Add Entry",
     "total_calories": "Total Today:",
-    "invalid_cal": "Invalid calorie input!"
+    "invalid_cal": "Invalid calorie input!",
+    "tab_user": "User Settings",
+    "tab_entry": "Entries",
+    "delete_user": "Delete User",
+    "confirm_delete_user": "Delete this user and all their entries?",
+    "user_deleted": "User successfully deleted",
+    "add_entry": "Add Entry",
+    "grams": "Grams (g)",
+    "cal100": "Calories (kcal/100g)"
 }
