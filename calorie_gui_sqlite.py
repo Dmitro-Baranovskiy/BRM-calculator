@@ -6,6 +6,8 @@ import sqlite3
 import json
 import os
 from datetime import datetime
+import matplotlib.pyplot as plt
+
 
 DB_PATH = "calories.db"
 
@@ -123,8 +125,44 @@ def load_today_entries(user_id):
     conn.close()
     return rows
 
+# Building graphs
+
+
+def show_calorie_chart(user_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        SELECT date, SUM(calories)
+        FROM entries
+        WHERE user_id=?
+        GROUP BY date
+        ORDER BY date DESC
+        LIMIT 7
+    """, (user_id,))
+    data = c.fetchall()
+    conn.close()
+
+    if not data:
+        messagebox.showinfo("!", "No data available.")
+        return
+
+    # Reverse to show the most recent date on the right
+    data.reverse()
+    dates = [d for d, _ in data]
+    totals = [cal for _, cal in data]
+
+    plt.figure(figsize=(7, 4))
+    plt.plot(dates, totals, marker='o', linestyle='-', color='darkorange')
+    plt.title("Calories over last 7 days")
+    plt.xlabel("Date")
+    plt.ylabel("Calories")
+    plt.xticks(rotation=45)
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 #  GUI
+
 
 class CalorieApp:
     def __init__(self, root):
@@ -353,6 +391,13 @@ class CalorieApp:
                   textvariable=self.total_cal,
                   font=("Arial", 14, "bold")
                   ).pack(pady=5)
+
+        # Show chart button
+        ttk.Button(
+            self.tab_entry,
+            text="Show Chart",
+            command=lambda: show_calorie_chart(self.user_id)
+        ).pack(pady=5)
 
         self.load_entries_into_tab()
 

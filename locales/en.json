@@ -33,5 +33,6 @@
     "user_deleted": "User successfully deleted",
     "add_entry": "Add Entry",
     "grams": "Grams (g)",
-    "cal100": "Calories (kcal/100g)"
+    "cal100": "Calories (kcal/100g)",
+    "show_chart": "Show Chart"
 }
